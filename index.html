@@ -108,7 +108,11 @@
                 state = { ...data };
                 
                 // Restauramos preferencias locales que no deben sincronizarse globalmente
-                state.userRole = currentRole; 
+                state.userRole = currentRole;
+
+                if (isFirstLoad || currentView === 'login' || !currentRole) {
+                    state.view = 'login';
+                }
                 
                 // Si es la primera carga, ocultamos el loader
                 if (isFirstLoad) {
@@ -143,7 +147,7 @@
             // Para mantener la sincronización del "En Vivo", sí guardamos liveSongIndex
             
             delete stateToSave.userRole; // El rol es local
-            // delete stateToSave.view; // Opcional: Si quieres que todos cambien de pantalla a la vez, quita esta linea.
+            delete stateToSave.view; // Opcional: Si quieres que todos cambien de pantalla a la vez, quita esta linea.
             
             // Guardamos en Firebase
             set(dbRef, stateToSave)
