@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Worship Manager Pro - Cloud</title>
+    <title>Worship Manager - Final Design</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -11,10 +11,7 @@
     <style>
         body { font-family: 'Inter', sans-serif; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        .animate-fade-in { animation: fadeIn 0.3s ease-out forwards; }
-        @keyframes bounceIn { 0% { transform: scale(0.9); opacity: 0; } 50% { transform: scale(1.05); } 100% { transform: scale(1); opacity: 1; } }
-        .animate-bounce-in { animation: bounceIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
-        .pin-input { -webkit-text-security: disc; }
+        .animate-fade-in { animation: fadeIn 0.4s ease-out forwards; }
         .lyrics-text { white-space: pre-wrap; line-height: 1.6; font-size: 1.25rem; }
         .custom-scrollbar::-webkit-scrollbar { height: 4px; width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
@@ -32,14 +29,13 @@
 
         <div id="loading-screen" class="absolute inset-0 z-50 bg-white flex flex-col items-center justify-center">
             <div class="loader mb-4"></div>
-            <p class="text-slate-500 text-sm font-medium">Sincronizando...</p>
+            <p class="text-slate-500 text-sm font-medium">Cargando diseño...</p>
         </div>
 
-        <div id="app" class="flex-1 overflow-y-auto pb-24 relative bg-slate-50 hidden">
-        </div>
+        <div id="app" class="flex-1 overflow-y-auto pb-24 relative bg-slate-50 hidden"></div>
 
         <div id="modal-overlay" class="fixed inset-0 bg-black/50 z-40 hidden flex items-center justify-center p-4 backdrop-blur-sm">
-            <div id="modal-content" class="bg-white w-full max-w-sm rounded-2xl p-6 shadow-2xl animate-bounce-in relative"></div>
+            <div id="modal-content" class="bg-white w-full max-w-sm rounded-2xl p-6 shadow-2xl animate-fade-in relative"></div>
         </div>
 
         <div id="bottom-nav" class="absolute bottom-0 left-0 right-0 bg-white border-t border-slate-200 p-3 flex justify-around text-slate-400 z-30 hidden">
@@ -58,7 +54,6 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getDatabase, ref, set, onValue, update } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
-        // CONFIGURACIÓN FIREBASE
         const firebaseConfig = {
             apiKey: "AIzaSyAIYzO5QPQ4kIoiDXarzZECs0NWOy_tMG0",
             authDomain: "worshipmanager-631ca.firebaseapp.com",
@@ -73,685 +68,316 @@
         const db = getDatabase(app);
         const dbRef = ref(db, 'worshipManagerData');
 
-        // ESTADO INICIAL (Estructura base)
         const INITIAL_STATE = {
-            view: 'login',      // LOCAL: No se guarda en nube
-            userRole: null,     // LOCAL: No se guarda en nube
-            liveTab: 'chords',  // LOCAL: Preferencia de vista en vivo
-            selectedEventId: null,
-            liveSongIndex: 0,   // GLOBAL: Sincronizado
+            view: 'login',      
+            userRole: null,     
+            liveTab: 'chords',  
+            selectedEventId: null, 
+            liveSongIndex: 0,   // LOCAL: Independiente
             events: [],         // GLOBAL: Sincronizado
-            teamDb: [           // GLOBAL: Sincronizado
-                { id: 201, name: "Carlos", role: "Voz Principal", instrument: "mic" },
-                { id: 202, name: "Ana", role: "Piano", instrument: "keys" }
-            ]
+            teamDb: []          // GLOBAL: Sincronizado
         };
 
         let state = { ...INITIAL_STATE };
         let isFirstLoad = true;
+        let lastEventsStr = "";
+        let lastTeamStr = "";
 
-        // --- LISTENER (Recibir datos sin romper la navegación) ---
+        // --- SISTEMA INTELIGENTE (Detecta cambios sin parpadear) ---
         onValue(dbRef, (snapshot) => {
             const data = snapshot.val();
             
             if (isFirstLoad) {
-                // PRIMERA CARGA:
-                // Cargamos datos pero forzamos el LOGIN. No importa qué diga la nube sobre la vista.
                 if (data) {
                     state.events = data.events || [];
                     state.teamDb = data.teamDb || [];
-                    state.liveSongIndex = data.liveSongIndex || 0;
-                    // No tocamos view ni userRole, se quedan como en INITIAL_STATE
+                    lastEventsStr = JSON.stringify(state.events);
+                    lastTeamStr = JSON.stringify(state.teamDb);
                 } else {
-                    // Si no hay datos (DB nueva), guardamos la estructura inicial
                     saveState(true);
                 }
-                
                 document.getElementById('loading-screen').style.display = 'none';
                 document.getElementById('app').classList.remove('hidden');
                 isFirstLoad = false;
                 render();
-            } 
-            else if (data) {
-                // ACTUALIZACIONES POSTERIORES (Evitar parpadeo):
-                // Solo actualizamos los DATOS, mantenemos la NAVEGACIÓN del usuario.
-                
+            } else if (data) {
+                const currentEventsStr = JSON.stringify(data.events || []);
+                const currentTeamStr = JSON.stringify(data.teamDb || []);
+                const eventsChanged = currentEventsStr !== lastEventsStr;
+                const teamChanged = currentTeamStr !== lastTeamStr;
+
                 state.events = data.events || [];
                 state.teamDb = data.teamDb || [];
                 
-                // Si estamos en vivo, el cambio de índice se notará al renderizar
-                state.liveSongIndex = data.liveSongIndex || 0;
+                lastEventsStr = currentEventsStr;
+                lastTeamStr = currentTeamStr;
 
-                // IMPORTANTE: NO sobrescribimos state.view ni state.userRole con lo que venga de la nube.
-                // Así cada usuario mantiene su pantalla.
-                
-                render();
+                // Si estamos en vivo y cambian datos de fondo, NO recargamos toda la pantalla.
+                // Solo recargamos si no estamos en vivo, o si usamos la función updateLiveDOM.
+                if (state.view !== 'live' && (eventsChanged || teamChanged)) {
+                    render();
+                } else if (state.view === 'live' && eventsChanged) {
+                    updateLiveDOM(); // Actualización quirúrgica
+                }
             }
         });
 
-        // --- GUARDAR EN NUBE (Filtrar datos locales) ---
         function saveState() {
-            // Creamos un objeto limpio SOLO con lo que debe ser global
             const stateToSave = {
                 events: state.events || [],
-                teamDb: state.teamDb || [],
-                liveSongIndex: state.liveSongIndex || 0
-                // NOTA: NO guardamos 'view' ni 'userRole'
+                teamDb: state.teamDb || []
             };
-            
-            set(dbRef, stateToSave)
-                .then(() => console.log("Datos sincronizados (Clean)"))
-                .catch((error) => showNotification("Error de conexión", "error"));
+            set(dbRef, stateToSave).catch(err => console.error(err));
         }
 
-        // --- NAVEGACIÓN LOCAL ---
-        window.loginAsMusician = function() {
-            state.userRole = 'musician';
-            window.navigate('dashboard');
-            showNotification("Bienvenido, Músico 🎵");
-        }
-
-        window.promptAdminLogin = function() {
-            const content = `
-                <h3 class="font-bold text-lg mb-4 text-center">Acceso de Líder</h3>
-                <form onsubmit="window.verifyAdmin(event)" class="space-y-4">
-                    <input type="tel" id="adminPin" placeholder="Código" class="pin-input w-full p-3 rounded-xl border border-slate-300 text-center text-2xl tracking-widest focus:ring-2 focus:ring-indigo-500 outline-none" maxlength="4" autoFocus>
-                    <button type="submit" class="w-full bg-indigo-600 text-white font-bold py-3 rounded-xl hover:bg-indigo-700">Entrar</button>
-                </form>
-                <button onclick="window.closeModal()" class="w-full mt-2 text-slate-400 text-sm py-2">Cancelar</button>
-            `;
-            showModal(content);
-            setTimeout(() => document.getElementById('adminPin').focus(), 100);
-        }
-
-        window.verifyAdmin = function(e) {
-            e.preventDefault();
-            const pin = document.getElementById('adminPin').value;
-            if (pin === '1717') { 
-                state.userRole = 'admin';
-                closeModal();
-                window.navigate('dashboard');
-                showNotification("Modo Líder Activado 🛠️");
-            } else {
-                alert("Código incorrecto");
-            }
-        }
-
-        window.logout = function() {
-            state.userRole = null;
-            window.navigate('login');
-        }
-
+        // --- NAVEGACIÓN ---
         window.navigate = function(view, eventId = null) {
             state.view = view;
             if (eventId !== null) state.selectedEventId = eventId;
             render();
-            // NO llamamos a saveState() aquí, la navegación es personal.
         }
 
-        // --- LÓGICA DE EVENTOS (Admin) ---
-        
+        window.loginAsMusician = function() { state.userRole = 'musician'; window.navigate('dashboard'); }
+        window.promptAdminLogin = function() {
+            const content = `
+                <h3 class="font-bold text-lg mb-4 text-center">Acceso de Líder</h3>
+                <form onsubmit="window.verifyAdmin(event)" class="space-y-4">
+                    <input type="tel" id="adminPin" placeholder="Código" class="pin-input w-full p-3 rounded-xl border border-slate-300 text-center text-2xl tracking-widest outline-none focus:border-indigo-500" maxlength="4" autoFocus>
+                    <button type="submit" class="w-full bg-indigo-600 text-white font-bold py-3 rounded-xl">Entrar</button>
+                </form>
+                <button onclick="window.closeModal()" class="w-full mt-2 text-slate-400 text-sm">Cancelar</button>`;
+            showModal(content);
+            setTimeout(() => document.getElementById('adminPin').focus(), 100);
+        }
+        window.verifyAdmin = function(e) {
+            e.preventDefault();
+            if (document.getElementById('adminPin').value === '1717') {
+                state.userRole = 'admin'; closeModal(); window.navigate('dashboard');
+            } else { alert("Código incorrecto"); }
+        }
+        window.logout = function() { state.userRole = null; window.navigate('login'); }
+
+        // --- LÓGICA MODO EN VIVO PERSONAL ---
         window.startLiveMode = function() {
             const event = getSelectedEvent();
-            if(!event || !event.songs || event.songs.length === 0) {
-                showNotification("No hay canciones", "error");
-                return;
-            }
-            
-            // Navegación LOCAL
+            if(!event || !event.songs || event.songs.length === 0) { showNotification("No hay canciones", "error"); return; }
+            state.liveSongIndex = 0;
             window.navigate('live');
-            
-            // Opcional: Si es admin, puede querer resetear la canción a la primera
-            // para que todos empiecen igual, pero solo cambia el índice, no la vista de otros.
-            if (state.userRole === 'admin') {
-                state.liveSongIndex = 0;
-                saveState();
-            }
         }
 
         window.jumpToSong = function(index) {
-            // Esto SÍ se guarda, porque queremos que todos vean la misma letra
             state.liveSongIndex = index;
-            saveState();
+            // ACTUALIZACIÓN SUAVE: No usamos render(), usamos updateDOM
+            updateLiveDOM();
             
-            // Scroll arriba localmente
-            const container = document.getElementById('live-content');
-            if(container) container.scrollTop = 0;
+            // Scroll al inicio
+            const content = document.getElementById('live-content-area');
+            if(content) content.scrollTop = 0;
+            
+            // Scroll tabs
+            const tabsContainer = document.getElementById('live-tabs-container');
+            const activeTab = document.getElementById(`song-tab-${index}`);
+            if(tabsContainer && activeTab) {
+                tabsContainer.scrollTo({ left: activeTab.offsetLeft - 20, behavior: 'smooth' });
+            }
         }
 
         window.setLiveTab = function(tab) {
             state.liveTab = tab;
-            render(); // Solo local
+            updateLiveDOM();
         }
 
-        window.handleNewEvent = function(e) {
-            e.preventDefault(); 
-            if(state.userRole !== 'admin') return;
-            const form = e.target;
-            const newEvent = {
-                id: Date.now(),
-                title: form.title.value || "Sin Título",
-                date: form.date.value,
-                time: form.time.value || "19:00",
-                type: form.type.value || "ensayo",
-                notes: form.notes.value || "", 
-                songs: [],
-                teamIds: []
-            };
-            if(!state.events) state.events = []; 
-            state.events.push(newEvent);
-            showNotification("Evento creado");
-            window.navigate('dashboard');
-            saveState();
-        }
+        // --- ACTUALIZACIÓN VISUAL SIN PARPADEO ---
+        function updateLiveDOM() {
+            // Si el DOM no existe (ej. refresh), renderizamos completo
+            if (!document.getElementById('live-root')) { render(); return; }
 
-        window.deleteEvent = function(id) {
-            if(state.userRole !== 'admin') return;
-            if(confirm("¿Eliminar este evento?")) {
-                state.events = state.events.filter(e => e.id !== id);
-                showNotification("Evento eliminado", "error");
-                window.navigate('dashboard');
-                saveState();
-            }
-        }
-
-        window.addSong = function(e) {
-            if(state.userRole !== 'admin') return;
-            e.preventDefault();
-            const form = e.target;
             const event = getSelectedEvent();
-            if(event && form.songTitle.value) {
-                if(!event.songs) event.songs = [];
-                event.songs.push({
-                    id: Date.now(),
-                    title: form.songTitle.value,
-                    artist: form.songArtist.value,
-                    key: form.songKey.value || "C",
-                    note: form.songNote.value || "",
-                    chords: form.songChords.value || "",
-                    lyrics: form.songLyrics.value || ""
-                });
-                form.reset();
-                showNotification("Canción agregada");
-                saveState();
-            }
-        }
-
-        window.deleteSong = function(songId) {
-            if(state.userRole !== 'admin') return;
-            const event = getSelectedEvent();
-            if(event) {
-                event.songs = event.songs.filter(s => s.id !== songId);
-                saveState();
-            }
-        }
-
-        window.createMember = function(e) {
-            if(state.userRole !== 'admin') return;
-            e.preventDefault();
-            const form = e.target;
-            const newMember = {
-                id: Date.now(),
-                name: form.name.value,
-                role: form.role.value,
-                instrument: form.instrument.value
-            };
-            if(!state.teamDb) state.teamDb = [];
-            state.teamDb.push(newMember);
-            form.reset();
-            showNotification("Miembro registrado");
-            saveState();
-        }
-
-        window.deleteMemberDb = function(id) {
-            if(state.userRole !== 'admin') return;
-            if(confirm("¿Eliminar miembro?")) {
-                state.teamDb = state.teamDb.filter(m => m.id !== id);
-                state.events.forEach(ev => { 
-                    if(ev.teamIds) ev.teamIds = ev.teamIds.filter(tid => tid !== id); 
-                });
-                saveState();
-            }
-        }
-
-        window.assignMember = function(memberId) {
-            const event = getSelectedEvent();
-            if(event) {
-                if(!event.teamIds) event.teamIds = [];
-                event.teamIds.push(memberId);
-                window.closeModal();
-                showNotification("Miembro asignado");
-                saveState();
-            }
-        }
-
-        window.removeMemberFromEvent = function(memberId) {
-            if(state.userRole !== 'admin') return;
-            const event = getSelectedEvent();
-            if(event) {
-                event.teamIds = event.teamIds.filter(id => id !== memberId);
-                saveState();
-            }
-        }
-        
-        window.resetData = function() {
-             if(confirm("ATENCIÓN: Esto borrará la base de datos de la nube para TODOS. ¿Seguro?")) {
-                // Solo reseteamos la parte de datos, mantenemos estructura local
-                state.events = [];
-                state.teamDb = INITIAL_STATE.teamDb;
-                state.liveSongIndex = 0;
-                saveState();
-                location.reload();
-             }
-        }
-
-        // --- HELPERS & MODALES ---
-        function getSelectedEvent() { return state.events?.find(e => e.id === state.selectedEventId); }
-        function getTeamMember(id) { return state.teamDb?.find(m => m.id === id); }
-        function formatDate(dateString) {
-            if (!dateString) return { day: '--', month: '---', full: 'Fecha no definida' };
-            const date = new Date(dateString + 'T12:00:00');
-            const day = date.getDate();
-            const month = date.toLocaleDateString('es-ES', { month: 'short' }).toUpperCase().replace('.', '');
-            return { day, month, full: date.toLocaleDateString() };
-        }
-        function getIconForInstrument(inst) {
-            const icons = { 'mic': 'mic-2', 'keys': 'music-4', 'guitar': 'guitar', 'drums': 'drum', 'bass': 'music', 'music': 'music' };
-            return icons[inst] || 'music';
-        }
-
-        window.openAddMemberModal = function() {
-            if(state.userRole !== 'admin') return;
-            const event = getSelectedEvent();
-            const availableMembers = state.teamDb.filter(m => !event.teamIds?.includes(m.id));
-            let content = `
-                <div class="flex justify-between items-center mb-4">
-                    <h3 class="font-bold text-lg">Asignar Equipo</h3>
-                    <button onclick="window.closeModal()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x"></i></button>
-                </div>
-            `;
-            if(availableMembers.length === 0) {
-                content += `<p class="text-slate-500 text-center py-4">Todos los miembros disponibles ya están asignados.</p>`;
-            } else {
-                content += `<div class="space-y-2 max-h-60 overflow-y-auto">`;
-                availableMembers.forEach(m => {
-                    content += `
-                        <button onclick="window.assignMember(${m.id})" class="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-indigo-50 border border-slate-100 text-left group">
-                            <div class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center group-hover:bg-indigo-200 text-slate-500 group-hover:text-indigo-700"><i data-lucide="plus" width="16"></i></div>
-                            <div><p class="font-bold text-slate-700 text-sm">${m.name}</p><p class="text-xs text-slate-400">${m.role}</p></div>
-                        </button>`;
-                });
-                content += `</div>`;
-            }
-            showModal(content);
-        }
-
-        window.showModal = function(html) {
-            document.getElementById('modal-content').innerHTML = html;
-            document.getElementById('modal-overlay').classList.remove('hidden');
-            lucide.createIcons();
-        }
-        window.closeModal = function() { document.getElementById('modal-overlay').classList.add('hidden'); }
-        
-        window.showNotification = function(message, type = 'success') {
-            const container = document.getElementById('toast-container');
-            const toast = document.createElement('div');
-            const colorClass = type === 'error' ? 'bg-red-500' : 'bg-slate-800';
-            toast.className = `${colorClass} text-white p-4 rounded-xl shadow-2xl flex items-center gap-3 animate-bounce-in pointer-events-auto`;
-            toast.innerHTML = `<i data-lucide="${type === 'error' ? 'alert-circle' : 'check-circle-2'}" width="20"></i><span class="text-sm font-medium">${message}</span>`;
-            container.appendChild(toast);
-            lucide.createIcons();
-            setTimeout(() => toast.remove(), 3000);
-        }
-
-        // --- RENDERIZADO ---
-        function render() {
-            const app = document.getElementById('app');
-            const bottomNav = document.getElementById('bottom-nav');
+            if(!event || !event.songs[state.liveSongIndex]) return;
             
-            if(!state.events) state.events = [];
-            if(!state.teamDb) state.teamDb = [];
-
-            app.innerHTML = '';
-
-            if (state.view === 'login') {
-                bottomNav.classList.add('hidden');
-                renderLogin(app);
-            } else if (state.view === 'dashboard') {
-                bottomNav.classList.remove('hidden');
-                renderDashboard(app);
-            } else if (state.view === 'create') {
-                bottomNav.classList.add('hidden');
-                renderCreateEvent(app);
-            } else if (state.view === 'detail') {
-                bottomNav.classList.add('hidden');
-                renderEventDetail(app);
-            } else if (state.view === 'admin') {
-                bottomNav.classList.remove('hidden');
-                renderAdminProfile(app);
-            } else if (state.view === 'live') {
-                bottomNav.classList.add('hidden');
-                renderLiveMode(app);
-            }
-            lucide.createIcons();
-        }
-
-        function renderLogin(container) {
-             container.innerHTML = `
-                <div class="flex flex-col items-center justify-center min-h-screen p-8 bg-gradient-to-br from-indigo-600 to-purple-700 text-white animate-fade-in">
-                    <div class="mb-8 p-4 bg-white/10 rounded-full backdrop-blur-md border border-white/20">
-                        <i data-lucide="music-2" width="48" height="48"></i>
-                    </div>
-                    <h1 class="text-3xl font-bold mb-2">Worship Team</h1>
-                    <p class="text-indigo-100 mb-10 text-center text-sm">Organiza tus ensayos y servicios en un solo lugar.</p>
-                    <div class="bg-indigo-800/50 px-4 py-2 rounded-lg mb-8 text-xs text-indigo-200 border border-indigo-500/30 flex items-center gap-2">
-                        <i data-lucide="cloud" width="14"></i> Sincronizado en la Nube
-                    </div>
-                    
-                    <div class="w-full space-y-4">
-                        <button onclick="window.loginAsMusician()" class="w-full bg-white text-indigo-700 font-bold py-4 rounded-xl shadow-lg hover:bg-indigo-50 active:scale-[0.98] transition-all flex items-center justify-center gap-3">
-                            <i data-lucide="headphones" width="20"></i> Soy Músico
-                        </button>
-                        <button onclick="window.promptAdminLogin()" class="w-full bg-indigo-800/50 border border-indigo-400/30 text-white font-semibold py-4 rounded-xl hover:bg-indigo-800/70 transition-all flex items-center justify-center gap-3">
-                            <i data-lucide="shield" width="20"></i> Soy Líder
-                        </button>
-                    </div>
-                </div>
-            `;
-        }
-
-        function renderDashboard(container) {
-            const sortedEvents = [...state.events].sort((a,b) => new Date(a.date) - new Date(b.date));
-            const isAdmin = state.userRole === 'admin';
-
-            let eventsHtml = sortedEvents.length === 0 
-                ? `<div class="flex flex-col items-center justify-center py-12 text-slate-400 opacity-70"><i data-lucide="calendar-off" class="mb-2"></i><p>No hay eventos próximos</p></div>`
-                : sortedEvents.map(event => {
-                    const dateData = formatDate(event.date);
-                    const isToday = new Date().toDateString() === new Date(event.date + 'T12:00:00').toDateString();
-                    return `
-                        <div onclick="window.navigate('detail', ${event.id})" class="relative bg-white p-5 rounded-2xl shadow-sm border border-slate-100 mb-4 cursor-pointer transition-all active:scale-[0.98] ${isToday ? 'ring-2 ring-indigo-500' : ''}">
-                             ${isToday ? '<span class="absolute -top-2 right-4 bg-indigo-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">HOY</span>' : ''}
-                            <div class="flex justify-between items-center">
-                                <div class="flex gap-4 items-center">
-                                    <div class="bg-indigo-50 text-indigo-700 rounded-xl w-14 h-14 flex flex-col items-center justify-center shrink-0">
-                                        <span class="text-[10px] font-bold uppercase leading-none mb-0.5">${dateData.month}</span>
-                                        <span class="text-xl font-bold leading-none">${dateData.day}</span>
-                                    </div>
-                                    <div>
-                                        <h3 class="font-bold text-slate-800 text-lg leading-tight mb-1">${event.title}</h3>
-                                        <div class="flex items-center gap-3 text-slate-500 text-xs">
-                                            <span class="flex items-center gap-1"><i data-lucide="clock" width="12"></i> ${event.time}</span>
-                                            <span class="bg-slate-100 px-2 py-0.5 rounded-md uppercase font-bold text-[10px] tracking-wide">${event.type}</span>
-                                        </div>
-                                    </div>
-                                </div>
-                                <i data-lucide="chevron-right" class="text-slate-300"></i>
-                            </div>
-                        </div>`;
-                }).join('');
-
-            container.innerHTML = `
-                <div class="p-6 pt-8 animate-fade-in">
-                    <header class="flex justify-between items-center mb-8">
-                        <div>
-                            <h1 class="text-2xl font-bold text-slate-900">Hola, ${isAdmin ? 'Líder' : 'Músico'} 👋</h1>
-                            <p class="text-slate-500 text-sm">${isAdmin ? 'Gestiona tus ensayos' : 'Revisa el repertorio'}</p>
-                        </div>
-                        ${isAdmin ? `
-                        <button onclick="window.navigate('create')" class="bg-indigo-600 text-white w-10 h-10 rounded-full shadow-lg shadow-indigo-200 flex items-center justify-center hover:bg-indigo-700 active:scale-90 transition-all">
-                            <i data-lucide="plus" width="24"></i>
-                        </button>` : ''}
-                    </header>
-                    <h2 class="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Agenda</h2>
-                    <div class="pb-20">${eventsHtml}</div>
-                </div>
-            `;
-        }
-
-        function renderEventDetail(container) {
-            const event = getSelectedEvent();
-            if (!event) return window.navigate('dashboard');
-            const dateData = formatDate(event.date);
-            const isAdmin = state.userRole === 'admin';
-
-            const songsHtml = !event.songs || event.songs.length === 0 
-                ? `<div class="text-center py-8 border-2 border-dashed border-slate-200 rounded-xl bg-slate-50"><p class="text-slate-400 text-sm">Sin canciones asignadas</p></div>`
-                : event.songs.map((song, idx) => `
-                    <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm mb-3">
-                        <div class="flex items-start justify-between">
-                            <div class="flex gap-4">
-                                <span class="text-slate-300 font-bold text-lg mt-0.5 w-6 text-center">${idx + 1}</span>
-                                <div class="flex-1">
-                                    <h3 class="font-bold text-slate-800 leading-tight">${song.title}</h3>
-                                    ${song.artist ? `<p class="text-xs text-slate-500 mt-0.5">${song.artist}</p>` : ''}
-                                    ${song.note ? `<div class="mt-1 bg-amber-50 border border-amber-100 rounded-md px-2 py-1 flex items-center gap-2 w-fit"><i data-lucide="info" width="12" class="text-amber-500 shrink-0"></i><span class="text-xs text-amber-700 font-medium">${song.note}</span></div>` : ''}
-                                </div>
-                            </div>
-                            <div class="flex flex-col items-end gap-2 shrink-0 ml-2">
-                                <div class="bg-indigo-50 px-2 py-1 rounded text-indigo-700 font-bold text-xl border border-indigo-100 min-w-[40px] text-center">${song.key}</div>
-                                ${isAdmin ? `<button onclick="window.deleteSong(${song.id})" class="text-slate-300 hover:text-red-500 p-1"><i data-lucide="trash-2" width="14"></i></button>` : ''}
-                            </div>
-                        </div>
-                    </div>`).join('');
-
-            const teamMembers = event.teamIds ? event.teamIds.map(id => getTeamMember(id)).filter(Boolean) : [];
-            const teamHtml = teamMembers.length === 0 
-                ? `<div class="col-span-2 text-center py-4 text-slate-400 text-sm italic">Sin equipo asignado</div>`
-                : teamMembers.map(m => `
-                    <div class="bg-white p-3 rounded-xl border border-slate-100 shadow-sm flex items-center justify-between group">
-                        <div class="flex items-center gap-3">
-                            <div class="w-9 h-9 rounded-full bg-teal-50 text-teal-600 flex items-center justify-center border border-teal-100"><i data-lucide="${getIconForInstrument(m.instrument)}" width="16"></i></div>
-                            <div><p class="font-bold text-slate-700 text-xs">${m.name}</p><p class="text-[10px] text-slate-400 uppercase">${m.role}</p></div>
-                        </div>
-                        ${isAdmin ? `<button onclick="window.removeMemberFromEvent(${m.id})" class="text-slate-300 hover:text-red-500 p-1"><i data-lucide="x" width="14"></i></button>` : ''}
-                    </div>`).join('');
-
-            container.innerHTML = `
-                <div class="animate-fade-in bg-slate-50 min-h-full">
-                    <div class="sticky top-0 bg-white/80 backdrop-blur-md border-b border-slate-200 z-20 px-4 py-3 flex justify-between items-center">
-                        <button onclick="window.navigate('dashboard')" class="p-2 -ml-2 text-slate-600 hover:bg-slate-100 rounded-full"><i data-lucide="arrow-left" width="20"></i></button>
-                        <div class="flex gap-2">
-                            ${isAdmin ? `<button onclick="window.deleteEvent(${event.id})" class="p-2 text-red-400 hover:bg-red-50 hover:text-red-600 rounded-full"><i data-lucide="trash-2" width="20"></i></button>` : ''}
-                            <button onclick="window.showNotification('Enlace copiado')" class="bg-indigo-600 text-white px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-1 hover:bg-indigo-700"><i data-lucide="share-2" width="14"></i> Compartir</button>
-                        </div>
-                    </div>
-
-                    <div class="p-6 pb-20">
-                        <div class="mb-6">
-                            <span class="text-[10px] font-bold uppercase tracking-wider text-indigo-600 bg-indigo-50 px-2 py-1 rounded mb-2 inline-block">${event.type}</span>
-                            <h1 class="text-2xl font-bold text-slate-900 leading-tight mb-2">${event.title}</h1>
-                            <div class="flex gap-4 text-sm text-slate-500 mb-4">
-                                <span class="flex items-center gap-1"><i data-lucide="calendar" width="14"></i> ${dateData.full}</span>
-                                <span class="flex items-center gap-1"><i data-lucide="clock" width="14"></i> ${event.time}</span>
-                            </div>
-                            
-                            ${event.notes ? `
-                            <div class="bg-yellow-50 border border-yellow-200 rounded-xl p-3 text-sm text-yellow-800 flex gap-2 items-start">
-                                <i data-lucide="info" width="16" class="mt-0.5 shrink-0"></i>
-                                <p>${event.notes}</p>
-                            </div>` : ''}
-
-                            ${event.songs && event.songs.length > 0 ? `
-                            <button onclick="window.startLiveMode()" class="w-full mt-4 bg-teal-600 text-white font-bold py-3 rounded-xl shadow-lg shadow-teal-200 hover:bg-teal-700 active:scale-[0.98] transition-all flex items-center justify-center gap-2">
-                                <i data-lucide="play" width="20"></i> Iniciar Modo En Vivo
-                            </button>` : ''}
-                        </div>
-
-                        <div class="mb-8">
-                            <div class="flex justify-between items-center mb-3">
-                                <h2 class="text-sm font-bold text-slate-700 uppercase tracking-wide flex items-center gap-2"><i data-lucide="users" width="16" class="text-teal-500"></i> Equipo</h2>
-                                ${isAdmin ? `<button onclick="window.openAddMemberModal()" class="text-teal-600 text-xs font-bold hover:underline flex items-center gap-1"><i data-lucide="plus" width="12"></i> Añadir</button>` : ''}
-                            </div>
-                            <div class="grid grid-cols-2 gap-2">${teamHtml}</div>
-                        </div>
-
-                        <div class="mb-8">
-                             <div class="flex justify-between items-center mb-3">
-                                <h2 class="text-sm font-bold text-slate-700 uppercase tracking-wide flex items-center gap-2"><i data-lucide="music" width="16" class="text-indigo-500"></i> Setlist</h2>
-                            </div>
-                            <div class="space-y-2 mb-4">${songsHtml}</div>
-                            
-                            ${isAdmin ? `
-                            <form onsubmit="window.addSong(event)" class="bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
-                                <div class="flex gap-2 mb-2">
-                                    <input type="text" name="songTitle" placeholder="Nombre canción..." class="flex-1 text-sm p-2 bg-slate-50 rounded-lg border-transparent focus:bg-white focus:ring-2 focus:ring-indigo-100 outline-none" required>
-                                    <input type="text" name="songKey" placeholder="Tono" class="w-16 text-sm p-2 bg-slate-50 rounded-lg border-transparent focus:bg-white focus:ring-2 focus:ring-indigo-100 outline-none text-center">
-                                </div>
-                                <div class="flex gap-2 mb-2">
-                                    <input type="text" name="songArtist" placeholder="Artista (opcional)" class="flex-1 text-xs p-2 bg-slate-50 rounded-lg border-transparent focus:bg-white outline-none">
-                                </div>
-                                <div class="flex gap-2 mb-2">
-                                    <input type="text" name="songNote" placeholder="Nota (Ej. Solo guitarra, coro suave...)" class="flex-1 text-xs p-2 bg-amber-50 rounded-lg border-transparent focus:bg-white focus:ring-2 focus:ring-amber-100 outline-none placeholder-amber-400 text-amber-800">
-                                </div>
-                                <div class="mb-2">
-                                    <textarea name="songChords" placeholder="Armonía / Acordes (Ej. Intro: | G | C | Em | D |)" rows="2" class="w-full text-xs p-2 bg-slate-50 rounded-lg border-transparent focus:bg-white focus:ring-2 focus:ring-indigo-100 outline-none font-mono"></textarea>
-                                </div>
-                                <div class="mb-2">
-                                    <textarea name="songLyrics" placeholder="Letra (Opcional)" rows="2" class="w-full text-xs p-2 bg-slate-50 rounded-lg border-transparent focus:bg-white focus:ring-2 focus:ring-indigo-100 outline-none"></textarea>
-                                </div>
-                                <button type="submit" class="w-full bg-slate-800 text-white p-2 rounded-lg hover:bg-black transition-colors flex items-center justify-center gap-2 text-sm font-bold"><i data-lucide="plus" width="16"></i> Agregar Canción</button>
-                            </form>` : ''}
-                        </div>
-                    </div>
-                </div>
-            `;
-        }
-
-        function renderLiveMode(container) {
-            const event = getSelectedEvent();
-            if(!event) return window.navigate('dashboard');
-            
-            if (state.liveSongIndex >= event.songs.length) state.liveSongIndex = 0;
-            const currentSong = event.songs[state.liveSongIndex];
-            if (!currentSong) return window.navigate('dashboard');
-
+            const song = event.songs[state.liveSongIndex];
             const isChords = state.liveTab === 'chords';
 
-            // Generar Tabs de canciones
-            const songTabsHtml = event.songs.map((s, idx) => `
-                <button onclick="window.jumpToSong(${idx})" 
-                        class="flex-shrink-0 px-4 py-2 rounded-full text-sm font-medium transition-all whitespace-nowrap border ${idx === state.liveSongIndex ? 'bg-indigo-500 text-white border-indigo-400 shadow-md ring-2 ring-indigo-500/30' : 'bg-slate-700/50 text-slate-300 border-slate-600 hover:bg-slate-700 hover:text-white'}">
-                    <span class="opacity-60 mr-1">${idx + 1}.</span> ${s.title}
-                </button>
-            `).join('');
-
-            container.innerHTML = `
-                <div class="h-screen bg-slate-900 text-white flex flex-col animate-fade-in relative dark-mode">
-                    <div class="flex flex-col bg-slate-800/90 backdrop-blur-md border-b border-slate-700 z-20 shadow-xl">
-                        <div class="flex items-center justify-between p-3 pb-0">
-                            <button onclick="window.navigate('detail')" class="p-2 text-slate-400 hover:text-white hover:bg-slate-700/50 rounded-full transition-colors">
-                                <i data-lucide="x" width="20"></i>
-                            </button>
-                            <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">CANCIÓN ${state.liveSongIndex + 1} DE ${event.songs.length}</span>
-                            <div class="bg-indigo-600/90 px-3 py-1 rounded text-white font-bold text-sm min-w-[36px] text-center shadow-lg border border-indigo-500/50">
-                                ${currentSong.key}
-                            </div>
-                        </div>
-                        <div class="w-full overflow-x-auto custom-scrollbar px-4 py-3 flex gap-3">
-                            ${songTabsHtml}
-                        </div>
-                        <div class="px-4 pb-4">
-                            <div class="flex bg-slate-900/50 p-1 rounded-xl border border-slate-700/50">
-                                <button onclick="window.setLiveTab('chords')" class="flex-1 py-3 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all ${isChords ? 'bg-indigo-600 text-white shadow-lg transform scale-[1.02]' : 'text-slate-400 hover:text-slate-200'}">
-                                    <i data-lucide="music" width="16"></i> Acordes
-                                </button>
-                                <button onclick="window.setLiveTab('lyrics')" class="flex-1 py-3 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all ${!isChords ? 'bg-teal-600 text-white shadow-lg transform scale-[1.02]' : 'text-slate-400 hover:text-slate-200'}">
-                                    <i data-lucide="mic-2" width="16"></i> Letra
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                    <div id="live-content" class="flex-1 overflow-y-auto p-6 scroll-smooth custom-scrollbar">
-                        <div class="text-center mb-6">
-                            <h2 class="text-2xl md:text-3xl font-bold text-white mb-1 tracking-tight">${currentSong.title}</h2>
-                            <p class="text-slate-400 text-sm">${currentSong.artist || ''}</p>
-                        </div>
-                        ${currentSong.note ? `
-                        <div class="mb-8 max-w-2xl mx-auto bg-amber-900/20 border border-amber-600/30 p-4 rounded-xl flex gap-3 items-start text-amber-200 text-sm shadow-sm backdrop-blur-sm">
-                            <i data-lucide="info" width="18" class="mt-0.5 shrink-0 text-amber-400"></i>
-                            <span class="leading-relaxed font-medium">${currentSong.note}</span>
-                        </div>` : ''}
-                        <div class="pb-12 animate-fade-in">
-                        ${isChords 
-                            ? `<pre class="font-mono text-base md:text-lg leading-relaxed text-slate-200 whitespace-pre-wrap font-medium">${currentSong.chords || 'No hay acordes registrados.'}</pre>` 
-                            : `<div class="lyrics-text text-center text-slate-100 font-medium max-w-2xl mx-auto">${currentSong.lyrics || 'No hay letra registrada.'}</div>`
-                        }
-                        </div>
-                    </div>
-                </div>
-            `;
-        }
-
-        function renderCreateEvent(container) {
-            container.innerHTML = `
-                <div class="p-6 animate-fade-in">
-                    <button onclick="window.navigate('dashboard')" class="text-slate-500 hover:text-slate-800 mb-6 flex items-center gap-2 font-medium"><i data-lucide="x" width="20"></i> Cancelar</button>
-                    <h1 class="text-2xl font-bold text-slate-900 mb-6">Nuevo Evento</h1>
-                    <form onsubmit="window.handleNewEvent(event)" class="space-y-5">
-                        <div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase tracking-wide">Título</label><input type="text" name="title" required placeholder="Ej. Ensayo Viernes" class="w-full p-3 rounded-xl border border-slate-200 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all bg-white shadow-sm"></div>
-                        <div class="grid grid-cols-2 gap-4">
-                            <div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase tracking-wide">Fecha</label><input type="date" name="date" required class="w-full p-3 rounded-xl border border-slate-200 focus:outline-none focus:border-indigo-500 bg-white shadow-sm text-sm"></div>
-                            <div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase tracking-wide">Hora</label><input type="time" name="time" required class="w-full p-3 rounded-xl border border-slate-200 focus:outline-none focus:border-indigo-500 bg-white shadow-sm text-sm"></div>
-                        </div>
-                        <div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase tracking-wide">Tipo</label><select name="type" class="w-full p-3 rounded-xl border border-slate-200 focus:outline-none focus:border-indigo-500 bg-white shadow-sm"><option value="ensayo">Ensayo</option><option value="servicio">Servicio / Culto</option><option value="evento">Evento Especial</option></select></div>
-                        <div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase tracking-wide">Notas Generales (Opcional)</label><textarea name="notes" placeholder="Ej. Llegar 15 min antes, vestimenta negra, etc." rows="2" class="w-full p-3 rounded-xl border border-slate-200 focus:outline-none focus:border-indigo-500 bg-white shadow-sm text-sm"></textarea></div>
-                        <div class="pt-4"><button type="submit" class="w-full bg-indigo-600 text-white font-bold py-4 rounded-xl shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition-all">Crear Evento</button></div>
-                    </form>
-                </div>`;
-        }
-
-        function renderAdminProfile(container) {
-            const isAdmin = state.userRole === 'admin';
-            if (!isAdmin) {
-                container.innerHTML = `
-                <div class="p-6 pt-8 animate-fade-in flex flex-col items-center justify-center h-full">
-                    <div class="w-20 h-20 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 mb-4"><i data-lucide="headphones" width="40"></i></div>
-                    <h2 class="text-2xl font-bold text-slate-900 mb-1">Modo Músico</h2>
-                    <p class="text-slate-500 text-center mb-8">Tienes acceso de lectura a todos los eventos.</p>
-                    <button onclick="window.logout()" class="w-full bg-slate-200 text-slate-700 font-bold py-3 rounded-xl hover:bg-slate-300">Cerrar Sesión</button>
-                </div>`;
-                return;
+            // Actualizamos textos específicos
+            safeSetText('live-song-key', song.key);
+            safeSetText('live-song-title', song.title);
+            safeSetText('live-song-artist', song.artist || '');
+            
+            // Nota
+            const noteEl = document.getElementById('live-song-note-container');
+            const noteText = document.getElementById('live-song-note');
+            if (noteEl && noteText) {
+                if (song.note) {
+                    noteEl.classList.remove('hidden');
+                    noteText.innerText = song.note;
+                } else {
+                    noteEl.classList.add('hidden');
+                }
             }
 
-            const membersHtml = state.teamDb.map(m => `
-                <div class="flex items-center justify-between p-3 bg-white rounded-lg border border-slate-100 shadow-sm mb-2">
-                    <div class="flex items-center gap-3">
-                        <div class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500"><i data-lucide="${getIconForInstrument(m.instrument)}" width="16"></i></div>
-                        <div><p class="font-bold text-slate-700 text-sm">${m.name}</p><p class="text-[10px] text-slate-400 uppercase">${m.role}</p></div>
-                    </div>
-                    <button onclick="window.deleteMemberDb(${m.id})" class="text-slate-300 hover:text-red-500 p-2"><i data-lucide="trash-2" width="16"></i></button>
-                </div>`).join('');
+            // Contenido Principal (HTML)
+            const mainContent = document.getElementById('live-main-content');
+            if (mainContent) {
+                if (isChords) {
+                    mainContent.innerHTML = `<pre class="font-mono text-base md:text-lg leading-relaxed text-slate-200 whitespace-pre-wrap font-medium animate-fade-in">${song.chords || 'Sin acordes'}</pre>`;
+                } else {
+                    mainContent.innerHTML = `<div class="lyrics-text text-center text-slate-100 font-medium max-w-2xl mx-auto animate-fade-in">${song.lyrics || 'Sin letra'}</div>`;
+                }
+            }
 
-            container.innerHTML = `
-                <div class="p-6 pt-8 animate-fade-in">
-                    <header class="flex justify-between items-center mb-6">
-                        <h1 class="text-2xl font-bold text-slate-900 flex items-center gap-2"><i data-lucide="settings-2" class="text-indigo-600"></i> Administración</h1>
-                        <button onclick="window.logout()" class="text-sm text-red-500 font-medium hover:underline">Salir</button>
-                    </header>
-                    <div class="bg-slate-50 rounded-xl p-4 border border-slate-200 mb-8">
-                        <h2 class="text-sm font-bold text-slate-700 uppercase tracking-wide mb-3">Registrar Nuevo Músico</h2>
-                        <form onsubmit="window.createMember(event)" class="space-y-3">
-                            <input type="text" name="name" required placeholder="Nombre (Ej. Juan Pérez)" class="w-full p-2 rounded-lg border border-slate-300 text-sm focus:ring-2 focus:ring-indigo-100 outline-none">
-                            <div class="grid grid-cols-2 gap-2">
-                                <input type="text" name="role" required placeholder="Rol (Ej. Bajista)" class="w-full p-2 rounded-lg border border-slate-300 text-sm outline-none">
-                                <select name="instrument" class="w-full p-2 rounded-lg border border-slate-300 text-sm outline-none"><option value="mic">Voz</option><option value="keys">Piano/Teclado</option><option value="guitar">Guitarra</option><option value="drums">Batería</option><option value="bass">Bajo</option><option value="music">Otro</option></select>
-                            </div>
-                            <button type="submit" class="w-full bg-slate-800 text-white text-sm font-bold py-2.5 rounded-lg hover:bg-slate-900">Guardar Músico</button>
-                        </form>
-                    </div>
-                    <div class="mb-8">
-                        <h2 class="text-sm font-bold text-slate-400 uppercase tracking-wider mb-3">Base de Datos: Miembros</h2>
-                        ${state.teamDb.length ? membersHtml : '<p class="text-sm text-slate-400 italic">No hay miembros registrados.</p>'}
-                    </div>
-                    <div class="mt-12 pt-6 border-t border-slate-200">
-                        <button onclick="window.resetData()" class="w-full border border-red-200 text-red-500 text-sm font-bold py-3 rounded-xl hover:bg-red-50 flex items-center justify-center gap-2"><i data-lucide="alert-triangle" width="16"></i> Resetear DB Nube</button>
-                        <p class="text-center text-[10px] text-slate-400 mt-2">PIN de Admin: 1717</p>
-                    </div>
-                </div>
-            `;
+            // Actualizar botones (Estilos)
+            const btnChords = document.getElementById('btn-view-chords');
+            const btnLyrics = document.getElementById('btn-view-lyrics');
+            
+            if (btnChords && btnLyrics) {
+                if(isChords) {
+                    btnChords.className = "flex-1 py-3 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all bg-indigo-600 text-white shadow-lg transform scale-[1.02]";
+                    btnLyrics.className = "flex-1 py-3 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all text-slate-400 hover:text-slate-200";
+                } else {
+                    btnChords.className = "flex-1 py-3 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all text-slate-400 hover:text-slate-200";
+                    btnLyrics.className = "flex-1 py-3 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all bg-teal-600 text-white shadow-lg transform scale-[1.02]";
+                }
+            }
+
+            // Actualizar Tabs
+            event.songs.forEach((s, i) => {
+                const tab = document.getElementById(`song-tab-${i}`);
+                if(tab) {
+                    if (i === state.liveSongIndex) {
+                        tab.className = "flex-shrink-0 px-4 py-2 rounded-full text-sm font-medium transition-all whitespace-nowrap border bg-indigo-500 text-white border-indigo-500 shadow-md ring-2 ring-indigo-500/30";
+                    } else {
+                        tab.className = "flex-shrink-0 px-4 py-2 rounded-full text-sm font-medium transition-all whitespace-nowrap border bg-slate-700/50 text-slate-300 border-slate-600 hover:bg-slate-700 hover:text-white";
+                    }
+                }
+            });
+        }
+        function safeSetText(id, txt) { const el = document.getElementById(id); if(el) el.innerText = txt; }
+
+        // --- GESTIÓN DE DATOS ---
+        window.handleNewEvent = function(e) { e.preventDefault(); const f=e.target; state.events.push({id:Date.now(),title:f.title.value,date:f.date.value,time:f.time.value,type:f.type.value,notes:f.notes.value,songs:[],teamIds:[]}); saveState(); window.navigate('dashboard'); }
+        window.deleteEvent = function(id) { if(confirm("¿Borrar?")) { state.events=state.events.filter(e=>e.id!==id); saveState(); window.navigate('dashboard'); } }
+        window.addSong = function(e) { e.preventDefault(); const f=e.target; const ev=getSelectedEvent(); if(ev){ if(!ev.songs)ev.songs=[]; ev.songs.push({id:Date.now(),title:f.songTitle.value,artist:f.songArtist.value,key:f.songKey.value||"C",note:f.songNote.value,chords:f.songChords.value,lyrics:f.songLyrics.value}); f.reset(); saveState(); } }
+        window.deleteSong = function(id) { const ev=getSelectedEvent(); if(ev){ ev.songs=ev.songs.filter(s=>s.id!==id); saveState(); } }
+        window.createMember = function(e){ e.preventDefault(); const f=e.target; state.teamDb.push({id:Date.now(),name:f.name.value,role:f.role.value,instrument:f.instrument.value}); f.reset(); saveState(); }
+        window.deleteMemberDb = function(id){ if(confirm("¿Borrar?")){ state.teamDb=state.teamDb.filter(m=>m.id!==id); state.events.forEach(e=>{if(e.teamIds)e.teamIds=e.teamIds.filter(t=>t!==id)}); saveState(); } }
+        window.assignMember = function(id){ const ev=getSelectedEvent(); if(ev){ if(!ev.teamIds)ev.teamIds=[]; ev.teamIds.push(id); closeModal(); saveState(); } }
+        window.removeMemberFromEvent = function(id){ const ev=getSelectedEvent(); if(ev){ ev.teamIds=ev.teamIds.filter(t=>t!==id); saveState(); } }
+        window.resetData = function(){ if(confirm("¿Resetear TODO?")){ state.events=[]; state.teamDb=[]; saveState(); location.reload(); } }
+
+        // --- HELPERS ---
+        function getSelectedEvent() { return state.events?.find(e => e.id === state.selectedEventId); }
+        function getTeamMember(id) { return state.teamDb?.find(m => m.id === id); }
+        function formatDate(d) { if(!d) return {day:'--',month:'---',full:''}; const date=new Date(d+'T12:00:00'); return {day:date.getDate(),month:date.toLocaleDateString('es-ES',{month:'short'}).toUpperCase().replace('.',''),full:date.toLocaleDateString()}; }
+        function getIcon(i) { const m={'mic':'mic-2','keys':'music-4','guitar':'guitar','drums':'drum','bass':'music'}; return m[i]||'music'; }
+
+        window.openAddMemberModal = function() {
+            const ev = getSelectedEvent();
+            const av = state.teamDb.filter(m => !ev.teamIds?.includes(m.id));
+            let h = `<div class="flex justify-between mb-4"><h3 class="font-bold">Asignar</h3><button onclick="window.closeModal()"><i data-lucide="x"></i></button></div>`;
+            if(av.length===0) h+=`<p class="text-slate-500 text-center text-sm">Sin miembros disponibles</p>`;
+            else { h+=`<div class="space-y-2 max-h-60 overflow-y-auto">`; av.forEach(m=>{h+=`<button onclick="window.assignMember(${m.id})" class="w-full text-left p-2 border rounded flex justify-between hover:bg-slate-50"><span class="font-bold text-sm">${m.name}</span><span class="text-xs text-slate-400">${m.role}</span></button>`}); h+=`</div>`; }
+            showModal(h);
+        }
+        window.showModal = function(h) { document.getElementById('modal-content').innerHTML=h; document.getElementById('modal-overlay').classList.remove('hidden'); lucide.createIcons(); }
+        window.closeModal = function() { document.getElementById('modal-overlay').classList.add('hidden'); }
+        window.showNotification = function(m,t='success') { const toast=document.createElement('div'); toast.className=`${t==='error'?'bg-red-500':'bg-slate-800'} text-white p-3 rounded-lg shadow-xl text-sm font-medium animate-fade-in`; toast.innerText=m; document.getElementById('toast-container').appendChild(toast); setTimeout(()=>toast.remove(),3000); }
+
+        // --- RENDERIZADO PRINCIPAL (DISEÑO ORIGINAL) ---
+        function render() {
+            const app = document.getElementById('app');
+            const nav = document.getElementById('bottom-nav');
+            const scroll = app.scrollTop;
+            app.innerHTML = '';
+            
+            if(state.view==='login') { nav.classList.add('hidden'); renderLogin(app); }
+            else if(state.view==='dashboard') { nav.classList.remove('hidden'); renderDashboard(app); }
+            else if(state.view==='create') { nav.classList.add('hidden'); renderCreateEvent(app); }
+            else if(state.view==='detail') { nav.classList.add('hidden'); renderEventDetail(app); }
+            else if(state.view==='admin') { nav.classList.remove('hidden'); renderAdminProfile(app); }
+            else if(state.view==='live') { nav.classList.add('hidden'); renderLiveMode(app); }
+            
+            lucide.createIcons();
+            if(state.view!=='live' && state.view!=='login') app.scrollTop = scroll;
         }
 
+        // --- PLANTILLAS ORIGINALES ---
+        function renderLogin(c) {
+             c.innerHTML = `
+                <div class="flex flex-col items-center justify-center min-h-screen p-8 bg-gradient-to-br from-indigo-600 to-purple-700 text-white animate-fade-in">
+                    <div class="mb-8 p-4 bg-white/10 rounded-full backdrop-blur-md border border-white/20"><i data-lucide="music-2" width="48" height="48"></i></div>
+                    <h1 class="text-3xl font-bold mb-2">Worship Team</h1>
+                    <p class="text-indigo-100 mb-10 text-center text-sm">Organiza tus ensayos y servicios en un solo lugar.</p>
+                    <div class="bg-indigo-800/50 px-4 py-2 rounded-lg mb-8 text-xs text-indigo-200 border border-indigo-500/30 flex items-center gap-2"><i data-lucide="cloud" width="14"></i> Sincronizado en la Nube</div>
+                    <div class="w-full space-y-4">
+                        <button onclick="window.loginAsMusician()" class="w-full bg-white text-indigo-700 font-bold py-4 rounded-xl shadow-lg hover:bg-indigo-50 active:scale-[0.98] transition-all flex items-center justify-center gap-3"><i data-lucide="headphones" width="20"></i> Soy Músico</button>
+                        <button onclick="window.promptAdminLogin()" class="w-full bg-indigo-800/50 border border-indigo-400/30 text-white font-semibold py-4 rounded-xl hover:bg-indigo-800/70 transition-all flex items-center justify-center gap-3"><i data-lucide="shield" width="20"></i> Soy Líder</button>
+                    </div>
+                </div>`;
+        }
+
+        function renderDashboard(c) {
+            const sorted=[...state.events].sort((a,b)=>new Date(a.date)-new Date(b.date));
+            const isAdmin = state.userRole === 'admin';
+            let h = sorted.length===0 ? `<div class="flex flex-col items-center justify-center py-12 text-slate-400 opacity-70"><i data-lucide="calendar-off" class="mb-2"></i><p>No hay eventos próximos</p></div>` : sorted.map(ev=>{
+                const d=formatDate(ev.date);
+                const isToday=new Date().toDateString()===new Date(ev.date+'T12:00:00').toDateString();
+                return `<div onclick="window.navigate('detail', ${ev.id})" class="relative bg-white p-5 rounded-2xl shadow-sm border border-slate-100 mb-4 cursor-pointer transition-all active:scale-[0.98] ${isToday ? 'ring-2 ring-indigo-500' : ''}">
+                    ${isToday ? '<span class="absolute -top-2 right-4 bg-indigo-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">HOY</span>' : ''}
+                    <div class="flex justify-between items-center"><div class="flex gap-4 items-center"><div class="bg-indigo-50 text-indigo-700 rounded-xl w-14 h-14 flex flex-col items-center justify-center shrink-0"><span class="text-[10px] font-bold uppercase leading-none mb-0.5">${d.month}</span><span class="text-xl font-bold leading-none">${d.day}</span></div><div><h3 class="font-bold text-slate-800 text-lg leading-tight mb-1">${ev.title}</h3><div class="flex items-center gap-3 text-slate-500 text-xs"><span class="flex items-center gap-1"><i data-lucide="clock" width="12"></i> ${ev.time}</span><span class="bg-slate-100 px-2 py-0.5 rounded-md uppercase font-bold text-[10px] tracking-wide">${ev.type}</span></div></div></div><i data-lucide="chevron-right" class="text-slate-300"></i></div></div>`;
+            }).join('');
+            c.innerHTML = `<div class="p-6 pt-8 animate-fade-in"><header class="flex justify-between items-center mb-8"><div><h1 class="text-2xl font-bold text-slate-900">Hola, ${isAdmin ? 'Líder' : 'Músico'} 👋</h1><p class="text-slate-500 text-sm">${isAdmin ? 'Gestiona tus ensayos' : 'Revisa el repertorio'}</p></div>${isAdmin ? `<button onclick="window.navigate('create')" class="bg-indigo-600 text-white w-10 h-10 rounded-full shadow-lg shadow-indigo-200 flex items-center justify-center hover:bg-indigo-700 active:scale-90 transition-all"><i data-lucide="plus" width="24"></i></button>` : ''}</header><h2 class="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Agenda</h2><div class="pb-20">${h}</div></div>`;
+        }
+
+        function renderEventDetail(c) {
+            const ev = getSelectedEvent(); if(!ev) return window.navigate('dashboard');
+            const isAdmin = state.userRole === 'admin';
+            const songsH = !ev.songs || ev.songs.length === 0 ? `<div class="text-center py-8 border-2 border-dashed border-slate-200 rounded-xl bg-slate-50"><p class="text-slate-400 text-sm">Sin canciones asignadas</p></div>` : ev.songs.map((s, i) => `
+                <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm mb-3">
+                    <div class="flex items-start justify-between"><div class="flex gap-4"><span class="text-slate-300 font-bold text-lg mt-0.5 w-6 text-center">${i+1}</span><div class="flex-1"><h3 class="font-bold text-slate-800 leading-tight">${s.title}</h3>${s.artist ? `<p class="text-xs text-slate-500 mt-0.5">${s.artist}</p>` : ''}</div></div><div class="flex flex-col items-end gap-2 shrink-0 ml-2"><div class="bg-indigo-50 px-2 py-1 rounded text-indigo-700 font-bold text-xl border border-indigo-100 min-w-[40px] text-center">${s.key}</div>${isAdmin ? `<button onclick="window.deleteSong(${s.id})" class="text-slate-300 hover:text-red-500 p-1"><i data-lucide="trash-2" width="14"></i></button>` : ''}</div></div></div>`).join('');
+            const teamH = (ev.teamIds||[]).map(id=>{const m=getTeamMember(id);if(!m)return '';return `<div class="bg-white p-3 rounded-xl border border-slate-100 shadow-sm flex items-center justify-between group"><div class="flex items-center gap-3"><div class="w-9 h-9 rounded-full bg-teal-50 text-teal-600 flex items-center justify-center border border-teal-100"><i data-lucide="${getIcon(m.instrument)}" width="16"></i></div><div><p class="font-bold text-slate-700 text-xs">${m.name}</p><p class="text-[10px] text-slate-400 uppercase">${m.role}</p></div></div>${isAdmin?`<button onclick="window.removeMemberFromEvent(${m.id})"><i data-lucide="x" width="14" class="text-red-400"></i></button>`:''}</div>`}).join('');
+            c.innerHTML = `<div class="animate-fade-in bg-slate-50 min-h-full"><div class="sticky top-0 bg-white/80 backdrop-blur-md border-b border-slate-200 z-20 px-4 py-3 flex justify-between items-center"><button onclick="window.navigate('dashboard')" class="p-2 -ml-2 text-slate-600 hover:bg-slate-100 rounded-full"><i data-lucide="arrow-left" width="20"></i></button><div class="flex gap-2">${isAdmin ? `<button onclick="window.deleteEvent(${ev.id})" class="p-2 text-red-400 hover:bg-red-50 hover:text-red-600 rounded-full"><i data-lucide="trash-2" width="20"></i></button>` : ''}</div></div><div class="p-6 pb-20"><div class="mb-6"><span class="text-[10px] font-bold uppercase tracking-wider text-indigo-600 bg-indigo-50 px-2 py-1 rounded mb-2 inline-block">${ev.type}</span><h1 class="text-2xl font-bold text-slate-900 leading-tight mb-2">${ev.title}</h1><div class="flex gap-4 text-sm text-slate-500 mb-4"><span class="flex items-center gap-1"><i data-lucide="calendar" width="14"></i> ${formatDate(ev.date).full}</span><span class="flex items-center gap-1"><i data-lucide="clock" width="14"></i> ${ev.time}</span></div>${ev.notes ? `<div class="bg-yellow-50 border border-yellow-200 rounded-xl p-3 text-sm text-yellow-800 flex gap-2 items-start"><i data-lucide="info" width="16" class="mt-0.5 shrink-0"></i><p>${ev.notes}</p></div>` : ''}${ev.songs && ev.songs.length > 0 ? `<button onclick="window.startLiveMode()" class="w-full mt-4 bg-teal-600 text-white font-bold py-3 rounded-xl shadow-lg shadow-teal-200 hover:bg-teal-700 active:scale-[0.98] transition-all flex items-center justify-center gap-2"><i data-lucide="play" width="20"></i> Iniciar Modo En Vivo (Personal)</button>` : ''}</div><div class="mb-8"><div class="flex justify-between items-center mb-3"><h2 class="text-sm font-bold text-slate-700 uppercase tracking-wide flex items-center gap-2"><i data-lucide="users" width="16" class="text-teal-500"></i> Equipo</h2>${isAdmin ? `<button onclick="window.openAddMemberModal()" class="text-teal-600 text-xs font-bold hover:underline flex items-center gap-1"><i data-lucide="plus" width="12"></i> Añadir</button>` : ''}</div><div class="grid grid-cols-2 gap-2">${teamH}</div></div><div class="mb-8"><div class="flex justify-between items-center mb-3"><h2 class="text-sm font-bold text-slate-700 uppercase tracking-wide flex items-center gap-2"><i data-lucide="music" width="16" class="text-indigo-500"></i> Setlist</h2></div><div class="space-y-2 mb-4">${songsH}</div>${isAdmin ? `<form onsubmit="window.addSong(event)" class="bg-white p-3 rounded-xl border border-slate-200 shadow-sm"><div class="flex gap-2 mb-2"><input type="text" name="songTitle" placeholder="Nombre canción..." class="flex-1 text-sm p-2 bg-slate-50 rounded-lg border-transparent focus:bg-white focus:ring-2 focus:ring-indigo-100 outline-none" required><input type="text" name="songKey" placeholder="Tono" class="w-16 text-sm p-2 bg-slate-50 rounded-lg border-transparent focus:bg-white focus:ring-2 focus:ring-indigo-100 outline-none text-center"></div><input type="text" name="songArtist" placeholder="Artista" class="w-full p-2 bg-slate-50 rounded text-xs outline-none"><textarea name="songChords" placeholder="Acordes" class="w-full p-2 bg-slate-50 rounded text-xs outline-none font-mono" rows="2"></textarea><textarea name="songLyrics" placeholder="Letra" class="w-full p-2 bg-slate-50 rounded text-xs outline-none" rows="2"></textarea><button type="submit" class="w-full bg-slate-800 text-white p-2 rounded-lg hover:bg-black transition-colors flex items-center justify-center gap-2 text-sm font-bold"><i data-lucide="plus" width="16"></i> Agregar Canción</button></form>` : ''}</div></div></div>`;
+        }
+
+        // --- RENDER LIVE MODE (Estructura Base para updateLiveDOM) ---
+        function renderLiveMode(c) {
+            const ev = getSelectedEvent(); if(!ev) return window.navigate('dashboard');
+            const song = ev.songs[state.liveSongIndex];
+            const isChords = state.liveTab === 'chords';
+            
+            const tabs = ev.songs.map((s, i) => `
+                <button id="song-tab-${i}" onclick="window.jumpToSong(${i})" class="flex-shrink-0 px-4 py-2 rounded-full text-sm font-medium transition-all whitespace-nowrap border ${i===state.liveSongIndex ? 'bg-indigo-500 text-white border-indigo-500 shadow-md ring-2 ring-indigo-500/30' : 'bg-slate-700/50 text-slate-300 border-slate-600 hover:bg-slate-700 hover:text-white'}">
+                    ${i+1}. ${s.title}
+                </button>`).join('');
+
+            c.innerHTML = `
+                <div id="live-root" class="h-screen bg-slate-900 text-white flex flex-col relative dark-mode">
+                    <div class="bg-slate-800/90 backdrop-blur border-b border-slate-700 z-20 shadow-xl">
+                        <div class="flex justify-between items-center p-3 pb-0">
+                            <button onclick="window.navigate('detail')" class="p-2 text-slate-400 hover:text-white hover:bg-slate-700/50 rounded-full transition-colors"><i data-lucide="x" width="20"></i></button>
+                            <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">EN VIVO (PERSONAL)</span>
+                            <div id="live-song-key" class="bg-indigo-600/90 px-3 py-1 rounded text-white font-bold text-sm min-w-[36px] text-center shadow-lg border border-indigo-500/50">${song.key}</div>
+                        </div>
+                        <div id="live-tabs-container" class="w-full overflow-x-auto custom-scrollbar px-4 py-3 flex gap-3">${tabs}</div>
+                        <div class="px-4 pb-4"><div class="flex bg-slate-900/50 p-1 rounded-xl border border-slate-700/50">
+                            <button id="btn-view-chords" onclick="window.setLiveTab('chords')" class="flex-1 py-3 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all ${isChords ? 'bg-indigo-600 text-white shadow-lg transform scale-[1.02]' : 'text-slate-400 hover:text-slate-200'}"><i data-lucide="music" width="16"></i> Acordes</button>
+                            <button id="btn-view-lyrics" onclick="window.setLiveTab('lyrics')" class="flex-1 py-3 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all ${!isChords ? 'bg-teal-600 text-white shadow-lg transform scale-[1.02]' : 'text-slate-400 hover:text-slate-200'}"><i data-lucide="mic-2" width="16"></i> Letra</button>
+                        </div></div>
+                    </div>
+                    <div id="live-content-area" class="flex-1 overflow-y-auto p-6 scroll-smooth custom-scrollbar">
+                        <div class="text-center mb-6">
+                            <h2 id="live-song-title" class="text-3xl font-bold text-white mb-1 tracking-tight">${song.title}</h2>
+                            <p id="live-song-artist" class="text-slate-400 text-sm">${song.artist||''}</p>
+                        </div>
+                        <div id="live-song-note-container" class="mb-8 max-w-2xl mx-auto bg-amber-900/20 border border-amber-600/30 p-4 rounded-xl flex gap-3 items-start text-amber-200 text-sm shadow-sm backdrop-blur-sm ${!song.note?'hidden':''}"><i data-lucide="info" width="18" class="mt-0.5 shrink-0 text-amber-400"></i><span id="live-song-note" class="leading-relaxed font-medium">${song.note}</span></div>
+                        <div id="live-main-content" class="pb-12 text-center animate-fade-in">
+                             ${isChords ? `<pre class="font-mono text-base md:text-lg leading-relaxed text-slate-200 whitespace-pre-wrap font-medium">${song.chords || 'Sin acordes'}</pre>` : `<div class="lyrics-text text-center text-slate-100 font-medium max-w-2xl mx-auto">${song.lyrics || 'Sin letra'}</div>`}
+                        </div>
+                    </div>
+                </div>`;
+        }
+        
+        function renderCreateEvent(c) { c.innerHTML = `<div class="p-6 animate-fade-in"><button onclick="window.navigate('dashboard')" class="text-slate-500 hover:text-slate-800 mb-6 flex items-center gap-2 font-medium"><i data-lucide="x" width="20"></i> Cancelar</button><h1 class="text-2xl font-bold text-slate-900 mb-6">Nuevo Evento</h1><form onsubmit="window.handleNewEvent(event)" class="space-y-5"><div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase tracking-wide">Título</label><input type="text" name="title" required placeholder="Ej. Ensayo Viernes" class="w-full p-3 rounded-xl border border-slate-200 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all bg-white shadow-sm"></div><div class="grid grid-cols-2 gap-4"><div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase tracking-wide">Fecha</label><input type="date" name="date" required class="w-full p-3 rounded-xl border border-slate-200 focus:outline-none focus:border-indigo-500 bg-white shadow-sm text-sm"></div><div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase tracking-wide">Hora</label><input type="time" name="time" required class="w-full p-3 rounded-xl border border-slate-200 focus:outline-none focus:border-indigo-500 bg-white shadow-sm text-sm"></div></div><select name="type" class="w-full p-3 rounded-xl border border-slate-200 focus:outline-none focus:border-indigo-500 bg-white shadow-sm"><option value="ensayo">Ensayo</option><option value="servicio">Servicio / Culto</option><option value="evento">Evento Especial</option></select><textarea name="notes" placeholder="Notas" class="w-full p-3 rounded-xl border border-slate-200 focus:outline-none focus:border-indigo-500 bg-white shadow-sm text-sm"></textarea><button type="submit" class="w-full bg-indigo-600 text-white font-bold py-4 rounded-xl shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition-all">Crear Evento</button></form></div>`; }
+        function renderAdminProfile(c) { if(state.userRole!=='admin'){c.innerHTML=`<div class="p-6 text-center pt-20"><h2 class="text-xl font-bold mb-4">Modo Músico</h2><button onclick="window.logout()" class="bg-slate-200 px-6 py-2 rounded-lg font-bold">Salir</button></div>`;return;} const list=state.teamDb.map(m=>`<div class="flex justify-between p-3 bg-white rounded-lg border border-slate-100 shadow-sm mb-2"><div class="flex items-center gap-3"><div class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500"><i data-lucide="${getIcon(m.instrument)}" width="16"></i></div><div><p class="font-bold text-slate-700 text-sm">${m.name}</p><p class="text-[10px] text-slate-400 uppercase">${m.role}</p></div></div><button onclick="window.deleteMemberDb(${m.id})" class="text-slate-300 hover:text-red-500 p-2"><i data-lucide="trash-2" width="16"></i></button></div>`).join(''); c.innerHTML = `<div class="p-6 pt-8 animate-fade-in"><header class="flex justify-between items-center mb-6"><h1 class="text-2xl font-bold text-slate-900 flex items-center gap-2"><i data-lucide="settings-2" class="text-indigo-600"></i> Administración</h1><button onclick="window.logout()" class="text-sm text-red-500 font-medium hover:underline">Salir</button></header><div class="bg-slate-50 rounded-xl p-4 border border-slate-200 mb-8"><h2 class="text-sm font-bold text-slate-700 uppercase tracking-wide mb-3">Registrar Nuevo Músico</h2><form onsubmit="window.createMember(event)" class="space-y-3"><input type="text" name="name" required placeholder="Nombre" class="w-full p-2 rounded-lg border border-slate-300 text-sm focus:ring-2 focus:ring-indigo-100 outline-none"><div class="grid grid-cols-2 gap-2"><input type="text" name="role" required placeholder="Rol" class="w-full p-2 rounded-lg border border-slate-300 text-sm outline-none"><select name="instrument" class="w-full p-2 rounded-lg border border-slate-300 text-sm outline-none"><option value="mic">Voz</option><option value="keys">Piano</option><option value="guitar">Guitarra</option><option value="drums">Batería</option><option value="bass">Bajo</option><option value="music">Otro</option></select></div><button class="w-full bg-slate-800 text-white text-sm font-bold py-2.5 rounded-lg hover:bg-slate-900">Guardar</button></form></div><div class="mb-8"><h2 class="text-sm font-bold text-slate-400 uppercase tracking-wider mb-3">Base de Datos</h2>${list}</div><button onclick="window.resetData()" class="w-full mt-10 border border-red-200 text-red-500 py-3 rounded-xl text-sm font-bold">Resetear DB</button></div>`; }
     </script>
 </body>
 </html>
