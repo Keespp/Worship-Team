@@ -86,7 +86,32 @@
         window.closeModal = () => document.getElementById('modal-overlay').classList.add('hidden');
         window.verifyAdmin = (e) => { e.preventDefault(); if (document.getElementById('adminPin').value === '1717') { state.userRole = 'admin'; window.closeModal(); window.navigate('dashboard'); } else { showNotification("Pin Incorrecto", "error"); } };
 
-        window.handleNewEvent = (e) => { e.preventDefault(); const f = e.target; state.events.push({ id: Date.now(), title: f.title.value, date: f.date.value, time: f.time.value, type: f.type.value, notes: f.notes.value, songIds: [], teamIds: [] }); saveState(); showNotification("Evento programado"); window.navigate('dashboard'); };
+         window.handleNewEvent = (e) => {
+            e.preventDefault();
+            const f = e.target;
+            const newEvent = {
+                id: Date.now(), title: f.title.value, date: f.date.value, time: f.time.value,
+                type: f.type.value, notes: f.notes.value, songIds: [], teamIds: []
+            };
+
+            state.events.push(newEvent);
+            saveState();
+            showNotification("Evento guardado");
+
+            const msg = `*NUEVO EVENTO PROGRAMADO* 📅%0A%0A` +
+                        `*Título:* ${newEvent.title}%0A` +
+                        `*Fecha:* ${newEvent.date}%0A` +
+                        `*Hora:* ${newEvent.time}%0A` +
+                        `*Tipo:* ${newEvent.type.toUpperCase()}%0A` +
+                        `*Notas:* ${newEvent.notes || 'N/A'}%0A%0A` +
+                        `_Revisa el Setlist en la App_`;
+
+            setTimeout(() => {
+                window.open(`https://api.whatsapp.com/send?text=${msg}`, '_blank');
+                window.navigate('dashboard');
+            }, 800);
+        };
+
         window.deleteEvent = (id) => { if(confirm("¿Eliminar este evento?")) { state.events = state.events.filter(e => e.id != id); saveState(); window.navigate('dashboard'); } };
 
         window.addSongToDb = (e) => { e.preventDefault(); const f=e.target; state.songsDb.push({ id: Date.now(), title: f.title.value, artist: f.artist.value, key: f.key.value || "C", chords: f.chords.value, lyrics: f.lyrics.value }); saveState(); f.reset(); showNotification("Canción guardada"); render(); };
